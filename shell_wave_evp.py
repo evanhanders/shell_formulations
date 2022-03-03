@@ -26,9 +26,6 @@ from mpi4py import MPI
 import logging
 logger = logging.getLogger(__name__)
 
-#eqn formulation
-formulation_index = 5
-
 # Parameters
 args   = docopt(__doc__)
 nθ  = int(args['--ntheta'])
@@ -75,100 +72,101 @@ grad_b0['g'][2] = N2_mag*(1 + ((r-Ri)/(Ro-Ri))**N2_pow)
 rvec['g'][2] = r
 er['g'][2] = 1
 
+for formulation_index in range(6):
+    print('\n\n')
+    logger.info('using formulation {}'.format(formulation_index))
+    # Lift operators for boundary conditions
+    lift_basis_k1 = basis.clone_with(k=1)
+    lift_basis_k2 = basis.clone_with(k=2)
+    lift_k1   = lambda A, n: d3.Lift(A, lift_basis_k1, n)
+    lift_k2   = lambda A, n: d3.Lift(A, lift_basis_k2, n)
+    if formulation_index in (0, 3):
+        logger.info('using standard FOF')
+        BC_u = lift_k1(tau_u1, -1)
+        BC_b = lift_k1(tau_b1, -1)
+        grad_u = d3.grad(u) + rvec*lift_k1(tau_u2, -1)
+        grad_b = d3.grad(b) + rvec*lift_k1(tau_b2, -1)
+        div_u = d3.trace(grad_u)
+    elif formulation_index in (1, 4):
+        logger.info('using k=2 formulation')
+        BC_u = lift_k2(tau_u1, -1) + lift_k2(tau_u2, -2)
+        BC_b = lift_k2(tau_b1, -1) + lift_k2(tau_b2, -2)
+        grad_b = d3.grad(b)
+        grad_u = d3.grad(u)
+        div_u = d3.div(u) + d3.dot(er, lift_k2(tau_u2, -1))
+    elif formulation_index in (2, 5):
+        logger.info('using k=2 with k=1 blend')
+        BC_u = lift_k1(tau_u1, -1) + lift_k2(tau_u2, -2)
+        BC_b = lift_k1(tau_b1, -1) + lift_k2(tau_b2, -2)
+        grad_b = d3.grad(b)
+        grad_u = d3.grad(u)
+        div_u = d3.div(u) + d3.dot(er, lift_k1(tau_u2, -1))
 
-FOF = True
-# Lift operators for boundary conditions
-lift_basis_k1 = basis.clone_with(k=1)
-lift_basis_k2 = basis.clone_with(k=2)
-lift_k1   = lambda A, n: d3.Lift(A, lift_basis_k1, n)
-lift_k2   = lambda A, n: d3.Lift(A, lift_basis_k2, n)
-if formulation_index in (0, 3):
-    logger.info('using standard FOF')
-    BC_u = lift_k1(tau_u1, -1)
-    BC_b = lift_k1(tau_b1, -1)
-    grad_u = d3.grad(u) + rvec*lift_k1(tau_u2, -1)
-    grad_b = d3.grad(b) + rvec*lift_k1(tau_b2, -1)
-    div_u = d3.trace(grad_u)
-elif formulation_index in (1, 4):
-    logger.info('using k=2 formulation')
-    BC_u = lift_k2(tau_u1, -1) + lift_k2(tau_u2, -2)
-    BC_b = lift_k2(tau_b1, -1) + lift_k2(tau_b2, -2)
-    grad_b = d3.grad(b)
-    grad_u = d3.grad(u)
-    div_u = d3.div(u) + d3.dot(er, lift_k2(tau_u2, -1))
-elif formulation_index in (2, 5):
-    logger.info('using k=2 with k=1 blend')
-    BC_u = lift_k1(tau_u1, -1) + lift_k2(tau_u2, -2)
-    BC_b = lift_k1(tau_b1, -1) + lift_k2(tau_b2, -2)
-    grad_b = d3.grad(b)
-    grad_u = d3.grad(u)
-    div_u = d3.div(u) + d3.dot(er, lift_k1(tau_u2, -1))
 
+    ddt = lambda A: -1j*omega*A
 
-ddt = lambda A: -1j*omega*A
+    if formulation_index in (3, 4):
+        logger.info("conditioning out ell = 0")
+        problem = d3.EVP([ b, p, u, tau_b1, tau_b2, tau_u1, tau_u2], eigenvalue=omega, namespace=locals())
 
-if formulation_index in (3, 4):
-    logger.info("conditioning out ell = 0")
-    problem = d3.EVP([ b, p, u, tau_b1, tau_b2, tau_u1, tau_u2], eigenvalue=omega, namespace=locals())
+        problem.add_equation("ddt(b) + dot(u, grad_b0) - kappa*div(grad_b) + BC_b = 0")
+        problem.add_equation("div_u = 0", condition="nθ != 0")
+        problem.add_equation("ddt(u) + grad(p) - nu*div(grad_u) + BC_u = 0", condition="nθ != 0")
+        problem.add_equation("p = 0", condition="nθ == 0")
+        problem.add_equation("u = 0", condition="nθ == 0")
 
-    problem.add_equation("ddt(b) + dot(u, grad_b0) - kappa*div(grad_b) + BC_b = 0")
-    problem.add_equation("div_u = 0", condition="nθ != 0")
-    problem.add_equation("ddt(u) + grad(p) - nu*div(grad_u) + BC_u = 0", condition="nθ != 0")
-    problem.add_equation("p = 0", condition="nθ == 0")
-    problem.add_equation("u = 0", condition="nθ == 0")
+        problem.add_equation("u(r=Ro) = 0", condition="nθ != 0")
+        problem.add_equation("u(r=Ri) = 0", condition="nθ != 0")
+        problem.add_equation("tau_u1 = 0", condition="nθ == 0")
+        problem.add_equation("tau_u2 = 0", condition="nθ == 0")
+        problem.add_equation("radial(grad_b(r=Ro)) = 0")
+        problem.add_equation("radial(grad_b(r=Ri)) = 0")
+    else:
+        logger.info("Using tau_p")
+        problem = d3.EVP([ b, p, u, tau_p, tau_b1, tau_b2, tau_u1, tau_u2], eigenvalue=omega, namespace=locals())
 
-    problem.add_equation("u(r=Ro) = 0", condition="nθ != 0")
-    problem.add_equation("u(r=Ri) = 0", condition="nθ != 0")
-    problem.add_equation("tau_u1 = 0", condition="nθ == 0")
-    problem.add_equation("tau_u2 = 0", condition="nθ == 0")
-    problem.add_equation("radial(grad_b(r=Ro)) = 0")
-    problem.add_equation("radial(grad_b(r=Ri)) = 0")
-else:
-    logger.info("Using tau_p")
-    problem = d3.EVP([ b, p, u, tau_p, tau_b1, tau_b2, tau_u1, tau_u2], eigenvalue=omega, namespace=locals())
+        problem.add_equation("ddt(b) + dot(u, grad_b0) - kappa*div(grad_b) + BC_b = 0")
+        problem.add_equation("div_u + tau_p = 0")
+        problem.add_equation("ddt(u) + grad(p) - nu*div(grad_u) + BC_u = 0")
 
-    problem.add_equation("ddt(b) + dot(u, grad_b0) - kappa*div(grad_b) + BC_b = 0")
-    problem.add_equation("div_u + tau_p = 0")
-    problem.add_equation("ddt(u) + grad(p) - nu*div(grad_u) + BC_u = 0")
+        problem.add_equation("u(r=Ro) = 0")
+        problem.add_equation("u(r=Ri) = 0")
+        problem.add_equation("radial(grad_b(r=Ro)) = 0")
+        problem.add_equation("radial(grad_b(r=Ri)) = 0")
+        problem.add_equation("integ(p) = 0")
 
-    problem.add_equation("u(r=Ro) = 0")
-    problem.add_equation("u(r=Ri) = 0")
-    problem.add_equation("radial(grad_b(r=Ro)) = 0")
-    problem.add_equation("radial(grad_b(r=Ri)) = 0")
-    problem.add_equation("integ(p) = 0")
+    logger.info("Problem built")
+    # Solver
+    solver = problem.build_solver()
+    logger.info("solver built")
 
-logger.info("Problem built")
-# Solver
-solver = problem.build_solver()
-logger.info("solver built")
+    if dist.comm_cart.size == 1:
+        import matplotlib.pyplot as plt 
+        figure = plt.figure(figsize=(8,4))
+        for subproblem in solver.subproblems:
+            ell = subproblem.group[1]
+            sp = subproblem
+            LHS = sp.pre_left.T @ (sp.M_min + 0.5*sp.L_min)
+            plt.imshow(np.log10(np.abs(LHS.A)))
+            plt.colorbar()
+            plt.savefig("matrices/ell_%03i.png" %ell, dpi=600)
+            plt.clf()
+            cond = np.linalg.cond((sp.M_min + 0.5*sp.L_min).A)
+            print('subproblem group {}, condition: {:.4e}'.format(subproblem.group, cond))
 
-if dist.comm_cart.size == 1:
-    import matplotlib.pyplot as plt 
-    figure = plt.figure(figsize=(8,4))
     for subproblem in solver.subproblems:
         ell = subproblem.group[1]
-        sp = subproblem
-        LHS = sp.pre_left.T @ (sp.M_min + 0.5*sp.L_min)
-        plt.imshow(np.log10(np.abs(LHS.A)))
-        plt.colorbar()
-        plt.savefig("matrices/ell_%03i.png" %ell, dpi=600)
-        plt.clf()
-        cond = np.linalg.cond((sp.M_min + 0.5*sp.L_min).A)
-        print('subproblem group {}, condition: {:.4e}'.format(subproblem.group, cond))
+        logger.info('solve_dense ell = {}'.format(ell))
+        solver.solve_dense(subproblem)
 
-for subproblem in solver.subproblems:
-    ell = subproblem.group[1]
-    logger.info('solve_dense ell = {}'.format(ell))
-    solver.solve_dense(subproblem)
+        values = solver.eigenvalues
+        vectors = solver.eigenvectors
 
-    values = solver.eigenvalues
-    vectors = solver.eigenvectors
+        cond1 = np.isfinite(values)
+        values = values[cond1]
+        vectors = vectors[cond1]
 
-    cond1 = np.isfinite(values)
-    values = values[cond1]
-    vectors = vectors[cond1]
-
-    growth = values.imag
-    logger.info('max growth: {:.2e}'.format(np.max(growth)))
-    print('max growth: {:.2e} / all growth {}'.format(np.max(growth), growth))
+        growth = values.imag
+        logger.info('max growth: {:.2e}'.format(np.max(growth)))
+#        print('max growth: {:.2e} / all growth {}'.format(np.max(growth), growth))
 
