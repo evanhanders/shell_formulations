@@ -5,7 +5,7 @@ Usage:
     shell_wave_evp.py [options]
 
 Options:
-    --Re=<Re>            The Reynolds number of the numerical diffusivities [default: 2e2]
+    --Re=<Re>            The Reynolds number of the numerical diffusivities [default: 4e3]
     --Pr=<Prandtl>       The Prandtl number  of the numerical diffusivities [default: 1]
     --ntheta=<res>       Number of theta grid points (Lmax+1)   [default: 3]
     --nr=<res>          Number of radial grid points in ball (Nmax+1)   [default: 16]
@@ -44,8 +44,9 @@ Ri = 1.1
 Ro = 1.5
 logger.info('r_inner: {:.2f} / r_outer: {:.2f}'.format(Ri, Ro))
 
-N2_mag = 0
+N2_mag = 10
 N2_pow = 1
+kappa_pow = 2
 
 run_formulations = [0, 1, 2, 3, 4, 5]
 for formulation_index in run_formulations:
@@ -74,13 +75,17 @@ for formulation_index in run_formulations:
         tau_p = dist.Field(name='tau_p')
 
         # NCCs
-        grad_b0 = dist.VectorField(coords, name='grad_b0', bases=basis.radial_basis)
-        rvec    = dist.VectorField(coords, name='rvec', bases=basis.radial_basis)
-        er      = dist.VectorField(coords, name='er', bases=basis.radial_basis)
+        grad_b0   = dist.VectorField(coords, name='grad_b0', bases=basis.radial_basis)
+        kappa_ncc = dist.Field(name='kappa_ncc', bases=basis.radial_basis)
+        rvec      = dist.VectorField(coords, name='rvec', bases=basis.radial_basis)
+        er        = dist.VectorField(coords, name='er', bases=basis.radial_basis)
 
         grad_b0['g'][2] = N2_mag*(1 + ((r-Ri)/(Ro-Ri))**N2_pow)
         rvec['g'][2] = r
         er['g'][2] = 1
+
+        kappa_ncc['g'] = (kappa/2)*(1 + ((r-Ri)/(Ro-Ri))**kappa_pow)
+
 
 
         logger.info('using formulation {}'.format(formulation_index))
@@ -110,17 +115,15 @@ for formulation_index in run_formulations:
             grad_b = d3.grad(b)
             grad_u = d3.grad(u)
             div_u = d3.div(u) + d3.dot(rvec, lift_k1(tau_u2, -1))
-    
+
         E = 0.5*(grad_u + d3.transpose(grad_u))
-
-
         ddt = lambda A: -1j*omega*A
 
         if formulation_index in (3, 4):
             logger.info("conditioning out ell = 0")
             problem = d3.EVP([ b, p, u, tau_b1, tau_b2, tau_u1, tau_u2], eigenvalue=omega, namespace=locals())
 
-            problem.add_equation("ddt(b) + dot(u, grad_b0) - kappa*div(grad_b) + BC_b = 0")
+            problem.add_equation("ddt(b) + dot(u, grad_b0) - kappa_ncc*div(grad_b) - dot(grad_b, grad(kappa_ncc)) + BC_b = 0")
             problem.add_equation("div_u = 0", condition="nθ != 0")
             problem.add_equation("ddt(u) - b*er + grad(p) - nu*div(grad_u) + BC_u = 0", condition="nθ != 0")
             problem.add_equation("p = 0", condition="nθ == 0")
@@ -138,7 +141,7 @@ for formulation_index in run_formulations:
             logger.info("Using tau_p")
             problem = d3.EVP([ b, p, u, tau_p, tau_b1, tau_b2, tau_u1, tau_u2], eigenvalue=omega, namespace=locals())
 
-            problem.add_equation("ddt(b) + dot(u, grad_b0) - kappa*div(grad_b) + BC_b = 0")
+            problem.add_equation("ddt(b) + dot(u, grad_b0) - kappa_ncc*div(grad_b) - dot(grad_b, grad(kappa_ncc)) + BC_b = 0")
             problem.add_equation("div_u + tau_p = 0")
             problem.add_equation("ddt(u) - b*er + grad(p) - nu*div(grad_u) + BC_u = 0")
 
