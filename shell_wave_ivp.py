@@ -121,7 +121,7 @@ for formulation_index in run_formulations:
 
     E = 0.5*(grad_u + d3.transpose(grad_u))
 
-    if formulation_index in (3, 4):
+    if formulation_index in (3, 4, 5):
         logger.info("conditioning out ell = 0")
         problem = d3.IVP([ b, p, u, tau_b1, tau_b2, tau_u1, tau_u2], namespace=locals())
 

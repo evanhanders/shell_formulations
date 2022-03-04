@@ -143,7 +143,7 @@ for formulation_index in run_formulations:
 
         ddt = lambda A: -1j*omega*A
 
-        if formulation_index in (3, 4):
+        if formulation_index in (3, 4, 5):
             logger.info("conditioning out ell = 0")
             problem = d3.EVP([ bB, pB, uB, bS, pS, uS, tau_bB, tau_uB, tau_b1S, tau_b2S, tau_u1S, tau_u2S], eigenvalue=omega, namespace=locals())
 
