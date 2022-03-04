@@ -115,7 +115,7 @@ for formulation_index in run_formulations:
         BC_bB = liftB(tau_bB)
         grad_uB = d3.grad(uB)
         grad_bB = d3.grad(bB)
-        div_uB = d3.div(uB) + d3.dot(erB, liftB(tau_uB))
+        div_uB = d3.div(uB)
         if formulation_index in (0, 3):
             logger.info('using standard FOF')
             BC_uS = lift_k1S(tau_u1S, -1)
